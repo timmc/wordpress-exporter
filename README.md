@@ -5,6 +5,8 @@ https://github.com/SchumacherFM/wordpress-to-hugo-exporter v1.6
 that has been modified to produce an export compatible with
 my personal static site generator.
 
+Assumes wp-content/uploads have already been downloaded separately.
+
 I was originally just making Hugo-compatible changes, and you can see
 the changelog at the last Hugo-compatible commit, tagged `hugo-last`.
 

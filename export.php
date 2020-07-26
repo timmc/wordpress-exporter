@@ -2,7 +2,7 @@
 
 /*
 Plugin Name: WordPress to SSG Exporter
-Description: Exports WordPress posts and comments as YAML/Markdown files for a static site generator
+Description: Exports WordPress posts and comments as JSON and Markdown files for a static site generator
 Version: 2.0
 Author: Benjamin J. Balter
 Author: Tim McCormack
@@ -28,7 +28,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 class SSG_Export
 {
     protected $_tempDir = null;
-    private $posts_dir_name = 'post'; // name of posts dir, inside content dir
 
     /**
      * Export comments as part of your posts. Pingbacks won't get exported.
@@ -37,16 +36,7 @@ class SSG_Export
      */
     private $include_comments = true;
 
-    // Dictionary of Wordpress options to Hugo config values
-    public $rename_options = array(
-        'siteurl' => 'baseUrl',
-        'blogname' => 'title',
-        'blogdescription' => 'description'
-    );
-
-    public $required_classes = array(
-        'spyc' => '%pwd%/includes/spyc.php'
-    );
+    private $json_options = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION;
 
     /**
      * Hook into WP Core
@@ -67,7 +57,7 @@ class SSG_Export
         if (get_current_screen()->id != 'export')
             return;
 
-        if (!isset($_GET['type']) || $_GET['type'] != 'hugo')
+        if (!isset($_GET['type']) || $_GET['type'] != 'ssg')
             return;
 
         if (!current_user_can('manage_options'))
@@ -83,7 +73,7 @@ class SSG_Export
     function register_menu()
     {
 
-        add_management_page(__('Export to Hugo', 'ssg-export'), __('Export to Hugo', 'ssg-export'), 'manage_options', 'export.php?type=hugo');
+        add_management_page(__('Export to SSG', 'ssg-export'), __('Export to SSG', 'ssg-export'), 'manage_options', 'export.php?type=ssg');
     }
 
     /**
@@ -123,8 +113,8 @@ class SSG_Export
     {
         $output = array(
             'title' => html_entity_decode(get_the_title($post), ENT_QUOTES | ENT_XML1, 'UTF-8'),
-            'author' => get_userdata($post->post_author)->display_name,
             'id' => $post->ID,
+            'author' => get_userdata($post->post_author)->display_name,
         );
         $timestamp = $this->post_unix_time($post);
         if (!is_null($timestamp)) {
@@ -140,12 +130,10 @@ class SSG_Export
             $output['draft'] = true;
         }
         if ($post->post_status == 'private') {
-            // hugo doesn't have the concept 'private posts' - this is just to
-            // disambiguate between private posts and drafts.
             $output['private'] = true;
         }
 
-        //turns permalink into 'url' format, since Hugo supports redirection on per-post basis
+        // Get permalink as an absolute path, not a full URI
         $output['url'] = urldecode(str_replace(home_url(), '', get_permalink($post)));
 
         // check if the post has a Featured Image assigned to it.
@@ -154,6 +142,7 @@ class SSG_Export
         }
 
         //convert traditional post_meta values, hide hidden values
+        $custom = array();
         foreach (get_post_custom($post->ID) as $key => $value) {
             if (substr($key, 0, 1) == '_') {
                 continue;
@@ -162,9 +151,13 @@ class SSG_Export
                 continue; // handled in convert_comments
             }
             if (false === $this->_isEmpty($value)) {
-                $output[$key] = $value;
+                $custom[$key] = $value;
             }
         }
+        if(!empty($custom)) {
+            $output['custom'] = $custom;
+        }
+
         return $output;
     }
 
@@ -178,13 +171,6 @@ class SSG_Export
                 return true;
             }
             return false;
-//            $isEmpty=true;
-//            foreach($value as $k=>$v){
-//                if(true === empty($v)){
-//                    $isEmpty
-//                }
-//            }
-//            return $isEmpty;
         }
         return true === empty($value);
     }
@@ -265,7 +251,7 @@ class SSG_Export
                 $meta['openID'] = true;
             }
 
-            $output = Spyc::YAMLDump($meta, false, 0);
+            $output = json_encode($meta, $this->json_options) or die(json_last_error_msg());
             $output .= "\n---\n";
             $output .= $comment->comment_content;
 
@@ -275,7 +261,7 @@ class SSG_Export
     }
 
     /**
-     * Loop through and convert all posts to MD files with YAML headers
+     * Loop through and convert all posts to MD files with JSON headers
      */
     function convert_posts()
     {
@@ -292,8 +278,7 @@ class SSG_Export
                 }
             }
 
-            // Hugo doesn't like word-wrapped permalinks
-            $output = Spyc::YAMLDump($meta, false, 0);
+            $output = json_encode($meta, $this->json_options) or die(json_last_error_msg());
             $output .= "\n---\n";
             $output .= $this->convert_content($post);
 
@@ -311,69 +296,24 @@ class SSG_Export
     }
 
     /**
-     *  Conditionally Include required classes
-     */
-    function require_classes()
-    {
-
-        foreach ($this->required_classes as $class => $path) {
-            if (class_exists($class)) {
-                continue;
-            }
-            $path = str_replace("%pwd%", dirname(__FILE__), $path);
-            require_once($path);
-        }
-    }
-
-    /**
      * Main function, bootstraps, converts, and cleans up
      */
     function export()
     {
         global $wp_filesystem;
 
-        define('DOING_JEKYLL_EXPORT', true);
-
-        $this->require_classes();
-
         add_filter('filesystem_method', array(&$this, 'filesystem_method_filter'));
 
         WP_Filesystem();
 
-        $this->dir = $this->getTempDir() . 'wp-ssg-' . md5(time());
-        $this->zip = $this->getTempDir() . 'wp-hugo.zip';
+        $this->dir = $this->getTempDir() . 'wp-ssg-' . time();
+        $this->zip = $this->getTempDir() . 'wp-ssg.zip';
         $wp_filesystem->mkdir($this->dir) or die("Failed to create export dir");
-        $wp_filesystem->mkdir("$this->dir/content") or die("Failed to create content dir");
-        $wp_filesystem->mkdir("$this->dir/content/$this->posts_dir_name") or die("Failed to create posts folder");
-        $wp_filesystem->mkdir("$this->dir/wp-content");
 
-        $this->convert_options();
         $this->convert_posts();
-        $this->convert_uploads();
         $this->zip();
         $this->send();
         $this->cleanup();
-    }
-
-    /**
-     * Convert options table to config.yaml file
-     */
-    function convert_options()
-    {
-        global $wp_filesystem;
-
-        $wp_options = wp_load_alloptions();
-        $hugo_config = array();
-        foreach ($this->rename_options as $from_key => $to_key) {
-            $hugo_config[$to_key] = maybe_unserialize($wp_options[$from_key]);
-        }
-
-        $output = Spyc::YAMLDump($hugo_config);
-
-        //strip starting "---"
-        $output = substr($output, 4);
-
-        $wp_filesystem->put_contents($this->dir . '/config.yaml', $output);
     }
 
     /**
@@ -387,7 +327,7 @@ class SSG_Export
             $date = date('Y-m-d', $timestamp);
         }
         $dirname = $date . '_' . urldecode($post->post_name);
-        return "$this->dir/content/$this->posts_dir_name/$dirname";
+        return "$this->dir/$dirname";
     }
 
     /**
@@ -488,13 +428,6 @@ class SSG_Export
 
         $keys[$index] = $to;
         $array = array_combine($keys, $array);
-    }
-
-    function convert_uploads()
-    {
-
-        $upload_dir = wp_upload_dir();
-        $this->copy_recursive($upload_dir['basedir'], $this->dir . '/' . str_replace(trailingslashit(get_home_url()), '', $upload_dir['baseurl']));
     }
 
     /**
