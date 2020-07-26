@@ -1,14 +1,15 @@
 <?php
 
 /*
-Plugin Name: WordPress to Hugo Exporter
-Description: Exports WordPress posts, comments, and options as YAML/MD files parsable by Hugo
-Version: 1.3
+Plugin Name: WordPress to SSG Exporter
+Description: Exports WordPress posts and comments as YAML/Markdown files for a static site generator
+Version: 2.0
 Author: Benjamin J. Balter
-Author URI: http://ben.balter.com
+Author: Tim McCormack
 License: GPLv3 or Later
 
-Copyright 2012-2013  Benjamin J. Balter  (email : Ben@Balter.com)
+Copyright 2012-2013 Benjamin J. Balter (email: Ben@Balter.com) and
+2020 Tim McCormack.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2, as
@@ -24,7 +25,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-class Hugo_Export
+class SSG_Export
 {
     protected $_tempDir = null;
     private $posts_dir_name = 'post'; // name of posts dir, inside content dir
@@ -82,7 +83,7 @@ class Hugo_Export
     function register_menu()
     {
 
-        add_management_page(__('Export to Hugo', 'hugo-export'), __('Export to Hugo', 'hugo-export'), 'manage_options', 'export.php?type=hugo');
+        add_management_page(__('Export to Hugo', 'ssg-export'), __('Export to Hugo', 'ssg-export'), 'manage_options', 'export.php?type=hugo');
     }
 
     /**
@@ -339,7 +340,7 @@ class Hugo_Export
 
         WP_Filesystem();
 
-        $this->dir = $this->getTempDir() . 'wp-hugo-' . md5(time());
+        $this->dir = $this->getTempDir() . 'wp-ssg-' . md5(time());
         $this->zip = $this->getTempDir() . 'wp-hugo.zip';
         $wp_filesystem->mkdir($this->dir) or die("Failed to create export dir");
         $wp_filesystem->mkdir("$this->dir/content") or die("Failed to create content dir");
@@ -453,7 +454,7 @@ class Hugo_Export
         if ('cli' !== php_sapi_name()) {
             //send headers
             @header('Content-Type: application/zip');
-            @header("Content-Disposition: attachment; filename=hugo-export.zip");
+            @header("Content-Disposition: attachment; filename=ssg-export.zip");
             @header('Content-Length: ' . filesize($this->zip));
         }
 
@@ -567,11 +568,11 @@ class Hugo_Export
     }
 }
 
-$je = new Hugo_Export();
+$je = new SSG_Export();
 
 if (defined('WP_CLI') && WP_CLI) {
 
-    class Hugo_Export_Command extends WP_CLI_Command
+    class SSG_Export_Command extends WP_CLI_Command
     {
 
         function __invoke()
@@ -582,5 +583,5 @@ if (defined('WP_CLI') && WP_CLI) {
         }
     }
 
-    WP_CLI::add_command('hugo-export', 'Hugo_Export_Command');
+    WP_CLI::add_command('ssg-export', 'SSG_Export_Command');
 }
